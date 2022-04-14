@@ -20,6 +20,7 @@ contract DemoBox is DemoBoxToken, Swap, Price {
     //each token Balance that the box should hold
     //******look if this needs to be made internal or private********
     mapping(string => uint256) public tokenBalance;
+    uint public tempBoxValue = 0;
 
 //constructor setting the initial token balances as 0
     constructor() {
@@ -63,16 +64,48 @@ contract DemoBox is DemoBoxToken, Swap, Price {
         tokenBalance["WETH9"] -= buyingAmountOfDAI;
     }
 
-
+    function approxWithdrawalAmount(uint _tokenAmount) public view returns(uint256) {
+        uint tempPercentageOfBoxValue = _tokenAmount*(10**18)/totalSupply();
+        uint valueInETH = tempBoxValue*percentageOfBoxValue*uint(getPrice(0xdCA36F27cbC4E38aE16C4E9f99D39b42337F6dcf))/(10**36);
+        return valueInETH;
+    }
 
 
     //function to withdraw eth for the DemoBoxToken
     //*************to we worked on*************
     function withdrawFunds(uint _tokenAmount) payable public {
+        require(balanceOf(msg.sender)>= _tokenAmount, "Box Token amount exceeding.");
+        uint percentageOfBoxValue = _tokenAmount*(10**18)/totalSupply();
         _burn(msg.sender, _tokenAmount);
-        uint fundsToGive = _tokenAmount*getBoxTokenPrice();
-        (bool sent,) = msg.sender.call{value : fundsToGive}("");
+        tempBoxValue -= tempBoxValue*percentageOfBoxValue/(10**18);
+        uint ETHToGive = sellTokensForWETH(percentageOfBoxValue);
+        swapExactWETH9ForETH(ETHToGive);
+        (bool sent, bytes memory data) = msg.sender.call{value : ETHToGive}("");
     }
+
+
+    function sellTokensForWETH(uint _percentageBoxValue) internal returns(uint256) {
+        //storing the selling amount of respective tokens
+        uint sellingAmountOfBAT = tokenBalance["BAT"]*_percentageBoxValue/(10**18);
+        uint sellingAmountOfUSDC = tokenBalance["USDC"]*_percentageBoxValue/(10**18);
+        uint sellingAmountOfDAI = tokenBalance["DAI"]*_percentageBoxValue/(10**18);
+        //storing the initial value of WETH9 to calculate WETH9 from the sell of the tokens
+        uint initialWETH9amount = tokenBalance["WETH9"];
+        //swaping tokens and updating contract's token balances
+        tokenBalance["WETH9"] += _swapExactInputSingle(sellingAmountOfBAT, "BAT", "WETH9");
+        tokenBalance["BAT"] -= sellingAmountOfBAT;
+        tokenBalance["WETH9"] += _swapExactInputSingle(sellingAmountOfUSDC, "USDC", "WETH9");
+        tokenBalance["USDC"] -= sellingAmountOfUSDC;
+        tokenBalance["WETH9"] += _swapExactInputSingle(sellingAmountOfDAI, "DAI", "WETH9");
+        tokenBalance["DAI"] -= sellingAmountOfDAI;
+        //returning the WETH9 deposited to contract from the sellings
+        return (tokenBalance["WETH9"] - initialWETH9amount);
+    }
+
+
+
+
+
 
     //function to get the amount of Box tokens to be minted
     function tokenAmountToMint(uint _value) private returns(uint) {
@@ -80,6 +113,8 @@ contract DemoBox is DemoBoxToken, Swap, Price {
         uint valueInUSD =  _value*uint256(getPrice(0x8A753747A1Fa494EC906cE90E9f37563A8AF630e))/uint256(10**8);
         //getting the price of Box Token in USD with 18 decimals
         uint boxTokenPrice = getBoxTokenPrice(); 
+        //calulating temporary Box Value for simulations
+        tempBoxValue += valueInUSD;
         //returning the amount of box tokens to be minted in 18 decimals
         return (valueInUSD*(10**18)/boxTokenPrice);
     }
@@ -103,7 +138,7 @@ contract DemoBox is DemoBoxToken, Swap, Price {
     //************Have to use Chainlink prices to calculate total value*************
     function getTotalBoxValue() public returns(uint256) { 
         //returning 1000USD in 18 decimals as total Box Value
-        return 1000*(10**18);
+        return tempBoxValue;
     }
 
     
@@ -118,8 +153,13 @@ contract DemoBox is DemoBoxToken, Swap, Price {
         tokenBalance["ETH"] -= msg.value;
         tokenBalance["WETH9"] += msg.value;    
     }
+
+    //function to swap exact WETH9 to ETH
+    function swapExactWETH9ForETH(uint _amount) payable public {
+        //calling the withdraw function in WETH9 contract to unwrap WETH9
+        wethtoken.withdraw(_amount);
+        //updating contract's token balance
+        tokenBalance["WETH9"] -= _amount; 
+        tokenBalance["ETH"] += _amount;
+    }
 }
-
-
-
-
